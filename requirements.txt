@@ -5,3 +5,5 @@ youtube-transcript-api
 yt-dlp
 python-dotenv
 sentence-transformers
+protobuf==4.25.3
+
