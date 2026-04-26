@@ -2,9 +2,6 @@ import os
 import pickle
 import faiss
 import numpy as np
-import requests
-import json
-import re
 from dotenv import load_dotenv
 from groq import Groq
 from youtube_transcript_api import YouTubeTranscriptApi
@@ -38,12 +35,7 @@ def get_embedding_model():
 
 # -------------------- TRANSCRIPT HELPERS -------------------- #
 def get_channel_video_ids(channel_url: str) -> list[str]:
-    ydl_opts = {
-        'extract_flat': True, 
-        'quiet': True, 
-        'playlistend': 100,
-        'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-    }
+    ydl_opts = {'extract_flat': True, 'quiet': True, 'playlistend': 100}
     with YoutubeDL(ydl_opts) as ydl:
         try:
             info = ydl.extract_info(channel_url, download=False)
@@ -56,55 +48,27 @@ def get_channel_video_ids(channel_url: str) -> list[str]:
             return []
 
 def get_transcript(video_id: str) -> str:
-    """Robust transcript fetching with yt-dlp and api fallbacks."""
-    url = f"https://www.youtube.com/watch?v={video_id}"
-    
-    # Try 1: yt-dlp (more likely to bypass blocks if metadata is accessible)
     try:
-        ydl_opts = {
-            'skip_download': True,
-            'writesubtitles': True,
-            'writeautomaticsub': True,
-            'subtitleslangs': ['en'],
-            'quiet': True,
-            'no_warnings': True,
-            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-        }
-        with YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-            if 'requested_subtitles' in info and 'en' in info['requested_subtitles']:
-                subs_data = info['requested_subtitles']['en']
-                subs_url = subs_data['url']
-                
-                # Fetch the subtitle content
-                response = requests.get(subs_url)
-                if response.status_code == 200:
-                    if subs_data.get('ext') == 'json3':
-                        content = response.json()
-                        text = ""
-                        for event in content.get('events', []):
-                            for seg in event.get('segs', []):
-                                text += seg.get('utf8', '')
-                        return text
-                    else:
-                        # Fallback to simple regex for other formats (VTT/SRT)
-                        return re.sub(r'<[^>]*>', '', response.text)
-    except Exception as e:
-        print(f"⚠️ yt-dlp transcript fetch failed: {e}")
-
-    # Try 2: YouTubeTranscriptApi (as fallback)
-    try:
+        # Note: Added language fallbacks and list retrieval to increase success chance
         transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
-        transcript = transcript_list.find_transcript(['en'])
+        
+        try:
+            transcript = transcript_list.find_manually_created_transcript(['en'])
+        except Exception:
+            try:
+                transcript = transcript_list.find_generated_transcript(['en'])
+            except Exception:
+                # Get the first available transcript and translate if needed
+                transcript = next(iter(transcript_list))
+                if transcript.language_code != 'en':
+                    transcript = transcript.translate('en')
+        
         return " ".join([chunk['text'] for chunk in transcript.fetch()])
     except Exception as e:
-        print(f"⚠️ YouTubeTranscriptApi fallback failed: {e}")
-
-    return None
+        print(f"⚠️ Transcript failed for {video_id}: {e}")
+        return None
 
 def chunk_text(text: str, chunk_size: int = 500) -> list[str]:
-    # Clean text from common artifacts
-    text = re.sub(r'\s+', ' ', text).strip()
     words = text.split()
     chunks = []
     for i in range(0, len(words), chunk_size - 50):
@@ -115,17 +79,14 @@ def chunk_text(text: str, chunk_size: int = 500) -> list[str]:
 def index_video(video_url: str, clear_existing: bool = False):
     model = get_embedding_model()
     
-    if clear_existing:
-        if os.path.exists(FAISS_INDEX_PATH): os.remove(FAISS_INDEX_PATH)
-        if os.path.exists(DOCS_PATH): os.remove(DOCS_PATH)
-        all_docs = []
-        index = faiss.IndexFlatL2(384)
-    elif os.path.exists(FAISS_INDEX_PATH) and os.path.exists(DOCS_PATH):
+    # Load existing or create new
+    if not clear_existing and os.path.exists(FAISS_INDEX_PATH) and os.path.exists(DOCS_PATH):
         with open(DOCS_PATH, "rb") as f:
             all_docs = pickle.load(f)
         index = faiss.read_index(FAISS_INDEX_PATH)
     else:
         all_docs = []
+        # dim = 384 for all-MiniLM-L6-v2
         index = faiss.IndexFlatL2(384)
 
     video_ids = get_channel_video_ids(video_url)
@@ -134,17 +95,19 @@ def index_video(video_url: str, clear_existing: bool = False):
 
     for video_id in video_ids:
         transcript = get_transcript(video_id)
-        if not transcript or len(transcript.strip()) < 10:
-            errors.append(f"Failed to fetch transcript for {video_id}. YouTube is blocking the cloud IP.")
+        if not transcript:
+            errors.append(f"Could not fetch transcript for {video_id}. (YouTube often blocks cloud IPs)")
             continue
 
         chunks = chunk_text(transcript)
         if not chunks:
             continue
 
+        # Generate embeddings
         embeddings = model.encode(chunks)
         index.add(np.array(embeddings).astype('float32'))
         
+        # Store metadata
         for chunk in chunks:
             all_docs.append({
                 "text": chunk,
@@ -153,6 +116,7 @@ def index_video(video_url: str, clear_existing: bool = False):
 
         indexed_count += 1
 
+    # Save index
     faiss.write_index(index, FAISS_INDEX_PATH)
     with open(DOCS_PATH, "wb") as f:
         pickle.dump(all_docs, f)
@@ -167,18 +131,21 @@ def index_video(video_url: str, clear_existing: bool = False):
 # -------------------- QUERY -------------------- #
 def query_video(question: str) -> dict:
     if not os.path.exists(FAISS_INDEX_PATH) or not os.path.exists(DOCS_PATH):
-        return {"answer": "No videos indexed yet. Please index a video first.", "sources": []}
+        return {"answer": "No videos indexed yet.", "sources": []}
 
     model = get_embedding_model()
     groq = get_groq_client()
     
+    # Load index and docs
     index = faiss.read_index(FAISS_INDEX_PATH)
     with open(DOCS_PATH, "rb") as f:
         all_docs = pickle.load(f)
 
+    # Search
     q_embedding = model.encode([question])
     D, I = index.search(np.array(q_embedding).astype('float32'), k=5)
 
+    # Combine results
     context_parts = []
     sources = []
     for idx in I[0]:
@@ -187,10 +154,10 @@ def query_video(question: str) -> dict:
             sources.append(all_docs[idx]["url"])
 
     if not context_parts:
-        return {"answer": "No relevant context found in the indexed videos.", "sources": []}
+        return {"answer": "No relevant info found.", "sources": []}
 
     context = "\n\n".join(context_parts)
-    prompt = f"Answer the question using ONLY the context provided.\n\nContext:\n{context}\n\nQuestion: {question}"
+    prompt = f"Answer the question using ONLY the YouTube transcript context below.\n\nContext:\n{context}\n\nQuestion: {question}"
 
     response = groq.chat.completions.create(
         model="llama-3.3-70b-versatile",

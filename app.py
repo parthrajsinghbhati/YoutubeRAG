@@ -11,21 +11,8 @@ st.caption("Now using FAISS for faster indexing on hosted environments")
 def load_embedding_model():
     return main.get_embedding_model()
 
+# Initialize resources
 load_embedding_model()
-
-with st.sidebar:
-    st.header("Settings")
-    clear_db = st.checkbox("Clear existing index", value=False)
-    
-    st.divider()
-    st.info("""
-    **🚀 Hosted Indexing:**
-    We are now using **FAISS**, which is much lighter for Streamlit Cloud.
-    
-    **⚠️ Transcript Block:**
-    If indexing still fails, it's because YouTube blocks cloud providers. 
-    You can still index **locally** and push `faiss_index.bin` and `docs.pkl` to GitHub!
-    """)
 
 video_url = st.text_input(
     "YouTube URL",
@@ -34,7 +21,7 @@ video_url = st.text_input(
 
 if st.button("Index Content") and video_url:
     with st.spinner("Indexing..."):
-        status = main.index_video(video_url, clear_existing=clear_db)
+        status = main.index_video(video_url, clear_existing=False)
     
     if status["indexed_videos"] > 0:
         st.success(f"Successfully indexed {status['indexed_videos']} video(s)!")
