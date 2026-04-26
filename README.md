@@ -1,5 +1,7 @@
 # YouTube Video RAG (Retrieval-Augmented Generation)
 
+[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_svg.svg)](https://youtuberag-hfdhuxzedexbmvjgtkvxgm.streamlit.app/)
+
 A powerful AI-driven application that allows you to "talk" to any YouTube video. Using local embeddings and the Groq LLM, this app indexes video transcripts and provides accurate, context-aware answers to your questions.
 
 ## Features
