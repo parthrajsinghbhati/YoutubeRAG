@@ -49,21 +49,10 @@ def get_channel_video_ids(channel_url: str) -> list[str]:
 
 def get_transcript(video_id: str) -> str:
     try:
-        # Note: Added language fallbacks and list retrieval to increase success chance
-        transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
-        
-        try:
-            transcript = transcript_list.find_manually_created_transcript(['en'])
-        except Exception:
-            try:
-                transcript = transcript_list.find_generated_transcript(['en'])
-            except Exception:
-                # Get the first available transcript and translate if needed
-                transcript = next(iter(transcript_list))
-                if transcript.language_code != 'en':
-                    transcript = transcript.translate('en')
-        
-        return " ".join([chunk['text'] for chunk in transcript.fetch()])
+        # Use the fetch method which is confirmed to work in this environment
+        api = YouTubeTranscriptApi()
+        transcript = api.fetch(video_id)
+        return " ".join([chunk.text for chunk in transcript])
     except Exception as e:
         print(f"⚠️ Transcript failed for {video_id}: {e}")
         return None
