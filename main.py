@@ -148,12 +148,22 @@ def query_video(question: str) -> dict:
     context = "\n\n".join(context_parts)
     prompt = f"Answer the question using ONLY the YouTube transcript context below.\n\nContext:\n{context}\n\nQuestion: {question}"
 
-    response = groq.chat.completions.create(
-        model="llama-3.3-70b-versatile",
-        messages=[{"role": "user", "content": prompt}]
-    )
-
-    return {
-        "answer": response.choices[0].message.content,
-        "sources": list(set(sources))
-    }
+    try:
+        response = groq.chat.completions.create(
+            model="llama-3.1-8b-instant",  # Use a lighter model to avoid rate limits
+            messages=[{"role": "user", "content": prompt}]
+        )
+        return {
+            "answer": response.choices[0].message.content,
+            "sources": list(set(sources))
+        }
+    except Exception as e:
+        if "rate_limit" in str(e).lower():
+            return {
+                "answer": "⚠️ Groq Rate Limit Hit: Too many requests! Please wait a minute and try again, or check your Groq quota.",
+                "sources": list(set(sources))
+            }
+        return {
+            "answer": f"⚠️ Error generating answer: {e}",
+            "sources": list(set(sources))
+        }
