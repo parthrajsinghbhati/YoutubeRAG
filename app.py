@@ -1,48 +1,55 @@
 import streamlit as st
 import main
 
-st.set_page_config(page_title="YouTube Video RAG", page_icon="🎥")
+st.set_page_config(page_title="YouTube RAG (FAISS)", page_icon="🎥")
 
 st.title("🎥 YouTube Video RAG")
-st.caption("Ask anything about a specific YouTube video or channel")
+st.caption("Now using FAISS for faster indexing on hosted environments")
 
-# Cache resources to prevent re-loading on every interaction
+# Cache resources
 @st.cache_resource
-def load_embedding_function():
-    return main.get_embedding_function()
+def load_embedding_model():
+    return main.get_embedding_model()
 
-@st.cache_resource
-def load_chroma_client():
-    return main.get_chroma_client()
+load_embedding_model()
 
-# Initialize resources
-load_embedding_function()
-load_chroma_client()
+with st.sidebar:
+    st.header("Settings")
+    clear_db = st.checkbox("Clear existing index", value=False)
+    
+    st.divider()
+    st.info("""
+    **🚀 Hosted Indexing:**
+    We are now using **FAISS**, which is much lighter for Streamlit Cloud.
+    
+    **⚠️ Transcript Block:**
+    If indexing still fails, it's because YouTube blocks cloud providers. 
+    You can still index **locally** and push `faiss_index.bin` and `docs.pkl` to GitHub!
+    """)
 
 video_url = st.text_input(
-    "YouTube URL (Video or Channel)",
-    placeholder="https://www.youtube.com/watch?v=... or https://www.youtube.com/@channel/videos"
+    "YouTube URL",
+    placeholder="https://www.youtube.com/watch?v=..."
 )
 
 if st.button("Index Content") and video_url:
-    with st.spinner("Indexing content... This may take a minute."):
-        status = main.index_video(video_url)
+    with st.spinner("Indexing..."):
+        status = main.index_video(video_url, clear_existing=clear_db)
     
     if status["indexed_videos"] > 0:
-        st.success(f"Indexed {status['indexed_videos']} video(s) with {status['total_chunks']} total segments!")
+        st.success(f"Successfully indexed {status['indexed_videos']} video(s)!")
     else:
-        st.error("Failed to index any videos.")
-        if status["errors"]:
-            for err in status["errors"]:
-                st.warning(err)
-        st.info("Note: YouTube transcripts are often blocked by hosting providers like Streamlit Cloud. You might need to use a proxy or run this locally.")
+        st.error("Indexing failed on the server.")
+        for err in status["errors"]:
+            st.warning(err)
+        st.info("Try the 'Local Indexing' fallback if the server is blocked.")
 
 st.divider()
 
-question = st.text_input("Ask a question about the indexed content")
+question = st.text_input("Ask a question")
 
 if st.button("Ask") and question:
-    with st.spinner("Searching and generating answer..."):
+    with st.spinner("Searching..."):
         result = main.query_video(question)
 
     st.write("**Answer:**")

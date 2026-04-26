@@ -1,6 +1,6 @@
 streamlit
 groq
-chromadb
+faiss-cpu
 youtube-transcript-api
 yt-dlp
 python-dotenv
