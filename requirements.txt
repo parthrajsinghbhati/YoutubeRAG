@@ -5,5 +5,7 @@ youtube-transcript-api
 yt-dlp
 python-dotenv
 sentence-transformers
+torch
+torchvision
 protobuf==4.25.3
 
