@@ -1,0 +1,7 @@
+streamlit
+groq
+chromadb
+youtube-transcript-api
+yt-dlp
+python-dotenv
+sentence-transformers
